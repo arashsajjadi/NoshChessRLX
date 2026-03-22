@@ -605,6 +605,8 @@ class HybridTrainer:
             self.epoch_in_stage,
             target_phase1_epochs,
         )
+        if not self.config.run.profile:
+            self.logger.info("TFLOPs profiling disabled (run.profile=false); table will report 0.00 estimates.")
         self._phase_table_header("I")
         self._recent_epoch_times["phase1"].clear()
 
@@ -637,7 +639,7 @@ class HybridTrainer:
                 eta_display=eta_display,
             )
 
-            self.logger.info(
+            self.logger.debug(
                 "Phase I epoch %d summary | loss=%.4f | pol=%.4f | val=%.4f | entropy=%.4f | grad=%.4f | tflops=%.2f | pos/s=%.2f | epoch_time=%s | phase_eta=%s",
                 epoch + 1,
                 metrics["loss_total"],
@@ -662,6 +664,8 @@ class HybridTrainer:
 
     def _run_phase2(self) -> None:
         self.logger.info("Starting Phase II self-play for %d epochs", self.config.phase2.epochs)
+        if not self.config.run.profile:
+            self.logger.info("TFLOPs profiling disabled (run.profile=false); table will report 0.00 estimates.")
         self._phase_table_header("II")
         self._recent_epoch_times["phase2"].clear()
 
@@ -713,7 +717,7 @@ class HybridTrainer:
                 eta_display=eta_display,
             )
 
-            self.logger.info(
+            self.logger.debug(
                 "Phase II epoch %d summary | loss=%.4f | pol=%.4f | val=%.4f | search=%.4f | entropy=%.4f | grad=%.4f | tflops=%.2f | lambda=%.4f | pos/s=%.2f | nodes/s=%.2f | teacher_ratio=%.3f | epoch_time=%s | phase_eta=%s",
                 epoch + 1,
                 metrics["loss_total"],
