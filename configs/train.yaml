@@ -18,35 +18,42 @@ hardware:
   gradient_accumulation_steps: 1
 
 run:
-  stage: full
-  continue_from: ""
-  clear_cache: True
+  stage: phase1
+  continue_from: ./chess_hybrid_rl_runs/checkpoints/regular/phase1_epoch_0032_step_00000032.pt
+  clear_cache: false
   safe_save_on_error: true
-  profile: true
+  profile: false
 
 teacher:
   enabled: true
   engine_path: /usr/games/stockfish
   threads: 10
   hash_mb: 4096
-  movetime_ms: 20
+  movetime_ms: 15
   depth: null
-  multipv: 3
+  multipv: 4
   cp_to_value_scale: 600.0
-  policy_temperature: 80.0
+  policy_temperature: 120.0
 
 phase1:
-  epochs: 32
+  epochs: 16
   batch_size: 2048
-  lr: 0.0003
+  lr: 0.0001
   weight_decay: 0.0001
   label_smoothing: 0.0
   policy_loss_weight: 1.0
   value_loss_weight: 0.5
-  entropy_weight: 0.001
-  teacher_samples_per_epoch: 24000
-  teacher_games_per_epoch: 48
-  max_teacher_game_plies: 100
+  entropy_weight: 0.0015
+  teacher_samples_per_epoch: 32000
+  teacher_games_per_epoch: 64
+  max_teacher_game_plies: 140
+  robust_distillation: true
+  opening_noise_min_plies: 6
+  opening_noise_max_plies: 18
+  move_injection_best_prob: 0.60
+  move_injection_topk_prob: 0.25
+  move_injection_random_prob: 0.15
+  move_injection_topk: 4
 
 phase2:
   epochs: 64

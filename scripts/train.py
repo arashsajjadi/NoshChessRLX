@@ -4,12 +4,24 @@ import argparse
 import sys
 from pathlib import Path
 
+import torch
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import load_config
 from src.trainer import HybridTrainer
+
+
+def detect_checkpoint_kind(checkpoint: object) -> str:
+    if not isinstance(checkpoint, dict):
+        return "unknown"
+    if "model_state_dict" not in checkpoint:
+        return "unknown"
+    if "optimizer_state_dict" in checkpoint:
+        return "full"
+    return "weights_only"
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,7 +61,23 @@ def main() -> None:
 
     trainer = HybridTrainer(config)
     if config.run.continue_from:
-        trainer.load_checkpoint(config.run.continue_from)
+        checkpoint_path = Path(config.run.continue_from).expanduser()
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+        # PyTorch 2.6 defaults torch.load to weights_only=True.
+        # Our trusted local checkpoints may include optimizer state and numpy objects.
+        # Use weights_only=False for local resume/initialization payloads.
+        checkpoint_payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        checkpoint_kind = detect_checkpoint_kind(checkpoint_payload)
+        if checkpoint_kind == "full":
+            trainer.load_checkpoint(checkpoint_path, checkpoint=checkpoint_payload)
+        elif checkpoint_kind == "weights_only":
+            trainer.load_model_weights_only(checkpoint_path, checkpoint=checkpoint_payload)
+        else:
+            raise RuntimeError(
+                f"Unsupported checkpoint format at {checkpoint_path}. "
+                "Expected full checkpoint or weight-only payload with model_state_dict."
+            )
     trainer.run()
 
 

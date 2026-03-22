@@ -65,6 +65,13 @@ class Phase1Config:
     teacher_samples_per_epoch: int = 12000
     teacher_games_per_epoch: int = 32
     max_teacher_game_plies: int = 100
+    robust_distillation: bool = False
+    opening_noise_min_plies: int = 6
+    opening_noise_max_plies: int = 18
+    move_injection_best_prob: float = 0.60
+    move_injection_topk_prob: float = 0.25
+    move_injection_random_prob: float = 0.15
+    move_injection_topk: int = 4
 
 
 @dataclass(slots=True)
