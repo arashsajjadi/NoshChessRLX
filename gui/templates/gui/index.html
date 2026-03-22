@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NoshChessRLX Analysis Board</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <link rel="stylesheet" href="{% static 'gui/vendor/css/chessboard-1.0.0.min.css' %}">
     <style>
         :root {
             --bg: #0f1117;
@@ -16,15 +16,10 @@
             --text: #eef3fb;
             --muted: #9ca8bd;
             --danger: #ff6b6b;
-            --good: #79e6a8;
             --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
             --border: rgba(255, 255, 255, 0.08);
         }
-
-        * {
-            box-sizing: border-box;
-        }
-
+        * { box-sizing: border-box; }
         body {
             margin: 0;
             font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -32,362 +27,170 @@
             color: var(--text);
             min-height: 100vh;
         }
-
-        .shell {
-            max-width: 1500px;
-            margin: 0 auto;
-            padding: 24px;
-        }
-
+        .shell { max-width: 1500px; margin: 0 auto; padding: 24px; }
         .hero {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            gap: 16px;
-            flex-wrap: wrap;
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px; gap: 16px; flex-wrap: wrap;
         }
-
-        .hero h1 {
-            margin: 0;
-            font-size: 1.9rem;
-            letter-spacing: 0.02em;
-        }
-
-        .hero p {
-            margin: 6px 0 0;
-            color: var(--muted);
-        }
-
+        .hero h1 { margin: 0; font-size: 1.9rem; letter-spacing: 0.02em; }
+        .hero p { margin: 6px 0 0; color: var(--muted); }
         .layout {
-            display: grid;
-            grid-template-columns: minmax(340px, 760px) minmax(320px, 1fr);
-            gap: 24px;
-            align-items: start;
+            display: grid; grid-template-columns: minmax(340px, 760px) minmax(320px, 1fr);
+            gap: 24px; align-items: start;
         }
-
-        .board-card,
-        .sidebar,
-        .controls {
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+        .board-card, .sidebar, .controls {
+            background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
             border: 1px solid var(--border);
             border-radius: 22px;
             box-shadow: var(--shadow);
         }
-
-        .board-card {
-            padding: 22px;
-        }
-
+        .board-card { padding: 22px; }
         .board-wrap {
             display: grid;
-            grid-template-columns: 28px minmax(280px, 720px);
+            grid-template-columns: 28px minmax(320px, 720px);
             gap: 16px;
-            align-items: stretch;
+            align-items: start;
         }
-
         .eval-bar {
             position: relative;
             border-radius: 18px;
             overflow: hidden;
             background: #10141c;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            min-height: 520px;
+            border: 1px solid rgba(255,255,255,0.12);
+            height: 640px;
         }
-
         .eval-bar__white {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
+            position: absolute; bottom: 0; left: 0; width: 100%;
             background: linear-gradient(180deg, #f9fbff, #d8e0ec);
             transition: height 220ms ease;
             height: 50%;
         }
-
         .eval-bar__marker {
-            position: absolute;
-            left: 0;
-            width: 100%;
-            height: 3px;
-            background: rgba(110, 168, 254, 0.95);
-            box-shadow: 0 0 14px rgba(110, 168, 254, 0.75);
+            position: absolute; left: 0; width: 100%; height: 3px;
+            background: rgba(110,168,254,0.95);
+            box-shadow: 0 0 14px rgba(110,168,254,0.75);
             transition: bottom 220ms ease;
             bottom: calc(50% - 1px);
         }
-
         .eval-label {
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 0.78rem;
-            font-weight: 700;
-            z-index: 2;
-            writing-mode: vertical-rl;
-            text-orientation: mixed;
-            user-select: none;
+            position: absolute; left: 50%; transform: translateX(-50%);
+            font-size: 0.78rem; font-weight: 700; z-index: 2;
+            writing-mode: vertical-rl; text-orientation: mixed; user-select: none;
             color: #111827;
         }
-
-        .eval-label--top {
-            top: 10px;
-            color: #f3f4f6;
-        }
-
-        .eval-label--bottom {
-            bottom: 10px;
-        }
-
-        .board-shell {
-            position: relative;
-        }
-
+        .eval-label--top { top: 10px; color: #f3f4f6; }
+        .eval-label--bottom { bottom: 10px; }
+        .board-shell { position: relative; width: 640px; max-width: 100%; }
         #board {
-            width: 100%;
-            max-width: 720px;
-            margin: 0 auto;
+            width: 640px; max-width: 100%; height: 640px;
+            margin: 0 auto; border-radius: 14px; overflow: hidden;
+            background: #0c1118; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
         }
-
+        .board-debug {
+            margin-top: 10px; color: var(--muted); font-size: 0.85rem; display: none;
+        }
+        .board-debug.visible { display: block; }
         .board-overlay {
-            position: absolute;
-            inset: 0;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            background: rgba(13, 17, 23, 0.58);
-            border-radius: 14px;
-            backdrop-filter: blur(3px);
-            z-index: 10;
+            position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+            background: rgba(13,17,23,0.58); border-radius: 14px; backdrop-filter: blur(3px); z-index: 10;
         }
-
-        .board-overlay.active {
-            display: flex;
-        }
-
+        .board-overlay.active { display: flex; }
         .thinking-pill {
-            padding: 12px 18px;
-            border-radius: 999px;
-            background: rgba(17, 24, 39, 0.82);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            color: var(--text);
-            font-weight: 700;
-            letter-spacing: 0.02em;
+            padding: 12px 18px; border-radius: 999px;
+            background: rgba(17,24,39,0.82); border: 1px solid rgba(255,255,255,0.12);
+            color: var(--text); font-weight: 700; letter-spacing: 0.02em;
         }
-
-        .sidebar {
-            padding: 20px;
-            display: grid;
-            gap: 16px;
-        }
-
+        .sidebar { padding: 20px; display: grid; gap: 16px; }
         .controls {
-            padding: 14px 16px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
-            margin-bottom: 16px;
+            padding: 14px 16px; display: flex; align-items: center; gap: 12px;
+            flex-wrap: wrap; margin-bottom: 16px;
         }
-
         .status {
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px 12px;
-            border-radius: 14px;
-            background: var(--panel);
-            border: 1px solid var(--border);
-            font-size: 0.96rem;
+            display: inline-flex; align-items: center; gap: 10px;
+            padding: 10px 12px; border-radius: 14px; background: var(--panel);
+            border: 1px solid var(--border); font-size: 0.96rem;
         }
-
         .dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 999px;
-            background: var(--accent-2);
-            box-shadow: 0 0 12px rgba(126, 240, 197, 0.8);
+            width: 10px; height: 10px; border-radius: 999px;
+            background: var(--accent-2); box-shadow: 0 0 12px rgba(126,240,197,0.8);
         }
-
-        .field {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .field label {
-            color: var(--muted);
-            font-size: 0.85rem;
-        }
-
+        .field { display: flex; flex-direction: column; gap: 6px; }
+        .field label { color: var(--muted); font-size: 0.85rem; }
         .field input {
-            min-width: 112px;
-            padding: 10px 12px;
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            background: var(--panel);
-            color: var(--text);
-            outline: none;
+            min-width: 112px; padding: 10px 12px; border-radius: 12px;
+            border: 1px solid var(--border); background: var(--panel);
+            color: var(--text); outline: none;
         }
-
         .btn {
-            border: 0;
-            border-radius: 14px;
-            padding: 11px 16px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+            border: 0; border-radius: 14px; padding: 11px 16px; font-weight: 700;
+            cursor: pointer; transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
         }
-
-        .btn:hover {
-            transform: translateY(-1px);
-        }
-
+        .btn:hover { transform: translateY(-1px); }
         .btn-primary {
             background: linear-gradient(135deg, var(--accent), #5ef6e8);
-            color: #08111d;
-            box-shadow: 0 14px 28px rgba(110, 168, 254, 0.22);
+            color: #08111d; box-shadow: 0 14px 28px rgba(110,168,254,0.22);
         }
-
         .btn-secondary {
-            background: var(--panel);
-            color: var(--text);
-            border: 1px solid var(--border);
+            background: var(--panel); color: var(--text); border: 1px solid var(--border);
         }
-
         .panel {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 18px;
-            padding: 16px;
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: 18px; padding: 16px;
         }
-
-        .panel h2,
-        .panel h3 {
-            margin: 0 0 12px;
-            font-size: 1rem;
-        }
-
+        .panel h2, .panel h3 { margin: 0 0 12px; font-size: 1rem; }
         .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(120px, 1fr));
-            gap: 12px;
+            display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 12px;
         }
-
         .metric {
-            padding: 12px;
-            border-radius: 16px;
-            background: var(--panel-2);
-            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 12px; border-radius: 16px; background: var(--panel-2);
+            border: 1px solid rgba(255,255,255,0.05);
         }
-
-        .metric .label {
-            color: var(--muted);
-            font-size: 0.82rem;
-            margin-bottom: 4px;
-        }
-
-        .metric .value {
-            font-size: 1.08rem;
-            font-weight: 700;
-        }
-
+        .metric .label { color: var(--muted); font-size: 0.82rem; margin-bottom: 4px; }
+        .metric .value { font-size: 1.08rem; font-weight: 700; }
         .classification-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 9px 12px;
-            border-radius: 999px;
-            background: rgba(126, 240, 197, 0.14);
-            border: 1px solid rgba(126, 240, 197, 0.3);
-            font-weight: 700;
+            display: inline-flex; align-items: center; gap: 8px; padding: 9px 12px;
+            border-radius: 999px; background: rgba(126,240,197,0.14);
+            border: 1px solid rgba(126,240,197,0.3); font-weight: 700;
         }
-
         .classification-pill.blunder {
-            background: rgba(255, 107, 107, 0.12);
-            border-color: rgba(255, 107, 107, 0.26);
+            background: rgba(255,107,107,0.12);
+            border-color: rgba(255,107,107,0.26);
         }
-
         .classification-pill.inaccuracy {
-            background: rgba(255, 191, 71, 0.12);
-            border-color: rgba(255, 191, 71, 0.26);
+            background: rgba(255,191,71,0.12);
+            border-color: rgba(255,191,71,0.26);
         }
-
         .move-list {
-            display: grid;
-            gap: 6px;
-            max-height: 240px;
-            overflow: auto;
-            padding-right: 4px;
+            display: grid; gap: 6px; max-height: 240px; overflow: auto; padding-right: 4px;
         }
-
         .move-row {
-            display: grid;
-            grid-template-columns: 48px 1fr 1fr;
-            gap: 10px;
-            padding: 10px 12px;
-            background: var(--panel-2);
-            border-radius: 12px;
-            font-size: 0.95rem;
+            display: grid; grid-template-columns: 48px 1fr 1fr; gap: 10px;
+            padding: 10px 12px; background: var(--panel-2); border-radius: 12px; font-size: 0.95rem;
         }
-
-        .pv-list {
-            display: grid;
-            gap: 10px;
-        }
-
+        .pv-list { display: grid; gap: 10px; }
         .pv-item {
-            padding: 12px;
-            border-radius: 14px;
-            background: var(--panel-2);
-            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 12px; border-radius: 14px; background: var(--panel-2);
+            border: 1px solid rgba(255,255,255,0.05);
         }
-
         .pv-meta {
-            display: flex;
-            justify-content: space-between;
-            gap: 8px;
-            color: var(--muted);
-            font-size: 0.84rem;
-            margin-bottom: 6px;
+            display: flex; justify-content: space-between; gap: 8px;
+            color: var(--muted); font-size: 0.84rem; margin-bottom: 6px;
         }
-
-        .pv-san {
-            font-size: 0.96rem;
-            line-height: 1.45;
-        }
-
+        .pv-san { font-size: 0.96rem; line-height: 1.45; }
         .error-banner {
-            display: none;
-            background: rgba(255, 107, 107, 0.16);
-            border: 1px solid rgba(255, 107, 107, 0.3);
-            color: #ffd6d6;
-            padding: 12px 14px;
-            border-radius: 14px;
+            display: none; background: rgba(255,107,107,0.16);
+            border: 1px solid rgba(255,107,107,0.3); color: #ffd6d6;
+            padding: 12px 14px; border-radius: 14px;
         }
-
-        .error-banner.visible {
-            display: block;
-        }
-
+        .error-banner.visible { display: block; }
         @media (max-width: 1120px) {
-            .layout {
-                grid-template-columns: 1fr;
-            }
+            .layout { grid-template-columns: 1fr; }
         }
-
-        @media (max-width: 700px) {
-            .shell {
-                padding: 14px;
-            }
-
-            .board-wrap {
-                grid-template-columns: 22px 1fr;
-                gap: 10px;
-            }
-
-            .eval-bar {
-                min-height: 360px;
-            }
+        @media (max-width: 760px) {
+            .shell { padding: 14px; }
+            .board-wrap { grid-template-columns: 22px 1fr; gap: 10px; }
+            .eval-bar { height: 360px; }
+            .board-shell, #board { width: 100%; height: auto; aspect-ratio: 1 / 1; }
         }
     </style>
 </head>
@@ -396,7 +199,7 @@
     <div class="hero">
         <div>
             <h1>NoshChessRLX Analysis Board</h1>
-            <p>Play against your RTX 5080 powered model and compare every move against Stockfish 17.</p>
+            <p>Play as White against your RTX 5080 powered model and compare every move against Stockfish 17.</p>
         </div>
         <div class="status">
             <span class="dot"></span>
@@ -423,11 +226,13 @@
                     <div class="eval-label eval-label--top">Black</div>
                     <div class="eval-label eval-label--bottom">White</div>
                 </div>
+
                 <div class="board-shell">
                     <div id="board"></div>
                     <div id="board-overlay" class="board-overlay">
                         <div class="thinking-pill">Analyzing…</div>
                     </div>
+                    <div id="board-debug" class="board-debug"></div>
                 </div>
             </div>
         </div>
@@ -436,22 +241,10 @@
             <div class="panel">
                 <h2>Position analysis</h2>
                 <div class="metrics-grid">
-                    <div class="metric">
-                        <div class="label">Evaluation</div>
-                        <div class="value" id="eval-text">+0.00</div>
-                    </div>
-                    <div class="metric">
-                        <div class="label">Depth</div>
-                        <div class="value" id="depth-text">0</div>
-                    </div>
-                    <div class="metric">
-                        <div class="label">Nodes</div>
-                        <div class="value" id="nodes-text">0</div>
-                    </div>
-                    <div class="metric">
-                        <div class="label">NPS</div>
-                        <div class="value" id="nps-text">0</div>
-                    </div>
+                    <div class="metric"><div class="label">Evaluation</div><div class="value" id="eval-text">+0.00</div></div>
+                    <div class="metric"><div class="label">Depth</div><div class="value" id="depth-text">0</div></div>
+                    <div class="metric"><div class="label">Nodes</div><div class="value" id="nodes-text">0</div></div>
+                    <div class="metric"><div class="label">NPS</div><div class="value" id="nps-text">0</div></div>
                 </div>
             </div>
 
@@ -478,12 +271,14 @@
 <form style="display:none;">{% csrf_token %}</form>
 {{ initial_state|json_script:"initial-state" }}
 
-<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chess.js@0.13.4/chess.min.js"></script>
+<script src="{% static 'gui/vendor/js/jquery-3.6.0.min.js' %}"></script>
+<script src="{% static 'gui/vendor/js/chessboard-1.0.0.min.js' %}"></script>
+
 <script>
     const INITIAL_STATE = JSON.parse(document.getElementById('initial-state').textContent);
+
     const boardElement = document.getElementById('board');
+    const boardDebug = document.getElementById('board-debug');
     const boardOverlay = document.getElementById('board-overlay');
     const statusText = document.getElementById('status-text');
     const errorBanner = document.getElementById('error-banner');
@@ -499,12 +294,22 @@
     const classificationWrap = document.getElementById('classification-wrap');
 
     let currentState = INITIAL_STATE;
-    let chessGame = new Chess();
     let board = null;
     let pendingPoll = null;
 
+    function debugBoard(message) {
+        boardDebug.textContent = message;
+        boardDebug.classList.add('visible');
+    }
+
+    function clearBoardDebug() {
+        boardDebug.textContent = '';
+        boardDebug.classList.remove('visible');
+    }
+
     function getCsrfToken() {
-        return document.querySelector('[name=csrfmiddlewaretoken]').value;
+        const tokenInput = document.querySelector('[name=csrfmiddlewaretoken]');
+        return tokenInput ? tokenInput.value : '';
     }
 
     function showError(message) {
@@ -521,18 +326,20 @@
         boardOverlay.classList.toggle('active', Boolean(isThinking));
     }
 
-    function syncChessFromState(state) {
-        chessGame.reset();
-        (state.moves_uci || []).forEach((move) => chessGame.move({ from: move.slice(0, 2), to: move.slice(2, 4), promotion: move.length > 4 ? move[4] : undefined }));
+    function assertFrontendLibraries() {
+        if (typeof window.Chessboard === 'undefined') {
+            throw new Error('Chessboard.js did not load');
+        }
+    }
+
+    function fenToBoardPosition(fen) {
+        if (!fen) return 'start';
+        return String(fen).trim().split(' ')[0];
     }
 
     function scoreToPercent(score) {
-        if (!score) {
-            return 50;
-        }
-        if (score.kind === 'mate') {
-            return score.value > 0 ? 100 : 0;
-        }
+        if (!score) return 50;
+        if (score.kind === 'mate') return score.value > 0 ? 100 : 0;
         const cp = Number(score.cp_white || 0);
         return Math.max(0, Math.min(100, 50 + 46 * Math.tanh(cp / 300)));
     }
@@ -575,27 +382,41 @@
 
     function renderMoveHistory(state) {
         moveList.innerHTML = '';
-        const scratch = new Chess();
-        const rows = [];
-        (state.moves_uci || []).forEach((uci, index) => {
-            const moveObj = { from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.length > 4 ? uci[4] : undefined };
-            const move = scratch.move(moveObj);
-            if (index % 2 === 0) {
-                rows.push({ moveNumber: Math.floor(index / 2) + 1, white: move.san, black: '' });
-            } else {
-                rows[rows.length - 1].black = move.san;
-            }
-        });
-        if (!rows.length) {
+        const pgn = (state.pgn || '').trim();
+
+        if (!pgn) {
             moveList.innerHTML = '<div class="move-row"><div>1</div><div>Start</div><div>Position</div></div>';
             return;
         }
-        rows.forEach((row) => {
-            const item = document.createElement('div');
-            item.className = 'move-row';
-            item.innerHTML = `<div>${row.moveNumber}</div><div>${row.white || ''}</div><div>${row.black || ''}</div>`;
-            moveList.appendChild(item);
-        });
+
+        const tokens = pgn.split(/\s+/).filter(Boolean);
+        let moveNo = null;
+        let white = '';
+        let black = '';
+
+        function pushRow() {
+            if (moveNo !== null) {
+                const item = document.createElement('div');
+                item.className = 'move-row';
+                item.innerHTML = `<div>${moveNo}</div><div>${white || ''}</div><div>${black || ''}</div>`;
+                moveList.appendChild(item);
+            }
+        }
+
+        for (const token of tokens) {
+            if (/^\d+\.$/.test(token)) {
+                if (moveNo !== null) pushRow();
+                moveNo = token.replace('.', '');
+                white = '';
+                black = '';
+                continue;
+            }
+            if (['1-0', '0-1', '1/2-1/2', '*'].includes(token)) continue;
+            if (!white) white = token;
+            else if (!black) black = token;
+        }
+
+        pushRow();
     }
 
     function renderClassification(state) {
@@ -616,55 +437,99 @@
         `;
     }
 
+    function createBoard(position) {
+        clearBoardDebug();
+        boardElement.innerHTML = '';
+        board = Chessboard('board', {
+            position: position,
+            orientation: 'white',
+            draggable: true,
+            showNotation: true,
+            sparePieces: false,
+            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+            onDragStart: onDragStart,
+            onDrop: onDrop,
+            onSnapEnd: () => {
+                if (board && currentState) {
+                    board.position(fenToBoardPosition(currentState.fen), false);
+                }
+            },
+        });
+        setTimeout(() => {
+            if (board) {
+                board.resize();
+                board.position(position, false);
+            }
+        }, 100);
+        debugBoard(`Board initialized. Position: ${position}`);
+    }
+
     function applyState(state) {
-        currentState = state;
-        syncChessFromState(state);
-        if (!board) {
-            board = Chessboard('board', {
-                position: state.fen,
-                draggable: true,
-                pieceTheme: 'https://cdn.jsdelivr.net/npm/@chrisoakman/chessboardjs@1.0.0/www/img/chesspieces/wikipedia/{piece}.png',
-                onDragStart: onDragStart,
-                onDrop: onDrop,
-                onSnapEnd: () => board.position(chessGame.fen()),
-            });
-        } else {
-            board.position(chessGame.fen(), false);
+        try {
+            assertFrontendLibraries();
+            currentState = state;
+            const boardPosition = fenToBoardPosition(state.fen);
+
+            if (!board) createBoard(boardPosition);
+            else {
+                board.position(boardPosition, false);
+                setTimeout(() => { if (board) board.resize(); }, 30);
+                debugBoard(`Board updated. Position: ${boardPosition}`);
+            }
+
+            statusText.textContent = state.status_text || 'Ready';
+            renderEvaluation(state.analysis);
+            renderTopLines(state.analysis);
+            renderMoveHistory(state);
+            renderClassification(state);
+            setThinking(Boolean(state.pending));
+            clearError();
+        } catch (error) {
+            console.error('applyState failed:', error);
+            showError(`Frontend error: ${error.message || error}`);
+            debugBoard(`Board error: ${error.message || error}`);
         }
-        statusText.textContent = state.status_text || 'Ready';
-        renderEvaluation(state.analysis);
-        renderTopLines(state.analysis);
-        renderMoveHistory(state);
-        renderClassification(state);
-        setThinking(Boolean(state.pending));
+    }
+
+    function chooseMoveUci(source, target, piece) {
+        const legalMoves = currentState && currentState.legal_moves ? currentState.legal_moves : [];
+        const base = `${source}${target}`;
+
+        if (legalMoves.includes(base)) return base;
+
+        if (piece === 'wP' && target.endsWith('8')) {
+            for (const suffix of ['q', 'r', 'b', 'n']) {
+                const candidate = `${base}${suffix}`;
+                if (legalMoves.includes(candidate)) return candidate;
+            }
+        }
+        return null;
     }
 
     function onDragStart(source, piece) {
-        if (currentState.pending || currentState.is_game_over) {
-            return false;
-        }
-        if (chessGame.turn() === 'b') {
-            return false;
-        }
-        if (piece.startsWith('b')) {
-            return false;
-        }
+        if (!currentState || currentState.pending || currentState.is_game_over) return false;
+        if (currentState.turn !== 'white') return false;
+        if (!piece || !piece.startsWith('w')) return false;
         return true;
     }
 
-    async function onDrop(source, target) {
+    function onDrop(source, target, piece) {
         clearError();
-        const move = chessGame.move({ from: source, to: target, promotion: 'q' });
-        if (move === null) {
-            return 'snapback';
-        }
-        board.position(chessGame.fen(), false);
+        const uci = chooseMoveUci(source, target, piece);
+        if (!uci) return 'snapback';
+
         setThinking(true);
         statusText.textContent = 'Submitting move…';
+        submitMoveAsync(uci);
+        return 'snapback';
+    }
+
+    async function submitMoveAsync(uci) {
         try {
             const formData = new URLSearchParams();
-            formData.set('move', move.from + move.to + (move.promotion || ''));
+            formData.set('move', uci);
             formData.set('simulations', simulationsInput.value || '128');
+
             const response = await fetch('{% url "gui:player_move" %}', {
                 method: 'POST',
                 headers: {
@@ -673,10 +538,12 @@
                 },
                 body: formData.toString(),
             });
+
             const payload = await response.json();
             if (!response.ok || !payload.ok) {
                 throw new Error(payload.error || 'Move submission failed.');
             }
+
             applyState(payload.state);
             pollTask(payload.task_id);
         } catch (error) {
@@ -688,9 +555,7 @@
     async function refreshState() {
         const response = await fetch('{% url "gui:game_state" %}');
         const payload = await response.json();
-        if (!response.ok || !payload.ok) {
-            throw new Error(payload.error || 'Failed to refresh state.');
-        }
+        if (!response.ok || !payload.ok) throw new Error(payload.error || 'Failed to refresh state.');
         applyState(payload.state);
     }
 
@@ -700,8 +565,10 @@
             clearTimeout(pendingPoll);
             pendingPoll = null;
         }
+
         const formData = new URLSearchParams();
         formData.set('simulations', simulationsInput.value || '128');
+
         const response = await fetch('{% url "gui:new_game" %}', {
             method: 'POST',
             headers: {
@@ -710,31 +577,38 @@
             },
             body: formData.toString(),
         });
+
         const payload = await response.json();
         if (!response.ok || !payload.ok) {
             throw new Error(payload.error || 'Unable to start a new game.');
         }
+
+        currentState = payload.state;
+        board = null;
         applyState(payload.state);
     }
 
     async function pollTask(taskId) {
-        if (!taskId) {
-            return;
-        }
+        if (!taskId) return;
+
         try {
             const response = await fetch(`{% url "gui:task_status" task_id="TASK_ID" %}`.replace('TASK_ID', taskId));
             const payload = await response.json();
+
             if (!response.ok || !payload.ok) {
                 throw new Error(payload.error || 'Failed to query task status.');
             }
+
             if (payload.status === 'pending') {
                 pendingPoll = setTimeout(() => pollTask(taskId), 350);
                 return;
             }
+
             if (payload.status === 'ready') {
                 applyState(payload.state);
                 return;
             }
+
             pendingPoll = setTimeout(() => pollTask(taskId), 500);
         } catch (error) {
             showError(error.message || 'Polling failed.');
@@ -743,28 +617,23 @@
     }
 
     document.getElementById('new-game-btn').addEventListener('click', async () => {
-        try {
-            await startNewGame();
-        } catch (error) {
-            showError(error.message || 'Unable to start a new game.');
-        }
+        try { await startNewGame(); }
+        catch (error) { showError(error.message || 'Unable to start a new game.'); }
     });
 
     document.getElementById('refresh-btn').addEventListener('click', async () => {
-        try {
-            await refreshState();
-        } catch (error) {
-            showError(error.message || 'Refresh failed.');
-        }
+        try { await refreshState(); }
+        catch (error) { showError(error.message || 'Refresh failed.'); }
     });
 
     window.addEventListener('resize', () => {
-        if (board) {
-            board.resize();
-        }
+        if (board) board.resize();
     });
 
-    applyState(INITIAL_STATE);
+    window.addEventListener('load', () => {
+        try { applyState(INITIAL_STATE); }
+        catch (error) { showError(error.message || 'Initial board load failed.'); }
+    });
 </script>
 </body>
 </html>

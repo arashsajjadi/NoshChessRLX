@@ -1,9 +1,31 @@
+# --- Python / Bytecode ---
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.venv/
+build/
+dist/
+
+# --- Django Specific ---
+db.sqlite3
+.env
+*.log
+
+# --- Project Specific (NoshChessRLX) ---
+# Ignore the massive results, logs, and cache folder
 chess_hybrid_rl_runs/
+# Ignore any rogue engine/shell artifacts (like the '0' and '4' files)
+[0-9]
+*.tmp
+
+# --- Model Weights & Checkpoints ---
+# We ignore these because they are too large for standard Git
+*.pt
+*.pth
+*.checkpoint
+
+# --- IDEs & OS ---
 .idea/
 .vscode/
-.venv/
-.env
-*.pt
-*.tmp
+.DS_Store
+Thumbs.db

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import math
+import os
+import platform
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +22,15 @@ from .env import RewardShaper
 from .mcts import MCTS
 from .model import PolicyValueNet
 from .teacher import StockfishTeacher
-from .telemetry import Telemetry, ThroughputMeter, build_logger, device_metrics, estimate_tflops_from_profile, policy_entropy_from_logits, projected_elo
+from .telemetry import (
+    Telemetry,
+    ThroughputMeter,
+    build_logger,
+    device_metrics,
+    estimate_tflops_from_profile,
+    policy_entropy_from_logits,
+    projected_elo,
+)
 from .utils import (
     atomic_torch_save,
     clear_cache_dirs,
@@ -29,7 +39,6 @@ from .utils import (
     ensure_dirs,
     format_seconds,
     get_rng_state,
-    grad_global_norm,
     maybe_compile,
     resolve_device,
     set_rng_state,
@@ -132,12 +141,8 @@ class HybridTrainer:
         self.best_projected_elo = float("-inf")
         self.last_emergency_save_time = time.time()
         self.teacher: Optional[StockfishTeacher] = None
-        self.logger.info(
-            "Initialized on %s | dtype=%s | params=%d",
-            self.device,
-            str(self.amp_dtype),
-            count_parameters(self.base_model),
-        )
+
+        self._log_run_header()
 
     def _unwrap_model(self, model: torch.nn.Module) -> torch.nn.Module:
         return getattr(model, "_orig_mod", model)
@@ -238,54 +243,324 @@ class HybridTrainer:
                     self.epoch_in_stage = 0
                     self.optimizer = self._build_optimizer("phase2")
                 self._run_phase2()
-        except Exception as exc:  # pragma: no cover
+        except Exception as exc:
             self.safe_save_on_error(exc)
             raise
         finally:
             self.close()
 
+    # -------------------------------------------------------------------------
+    # Pretty run header and table helpers
+    # -------------------------------------------------------------------------
+
+    def _runtime_snapshot(self) -> Dict[str, str]:
+        if self.device.type == "cuda":
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_props = torch.cuda.get_device_properties(0)
+            gpu_mem_gb = gpu_props.total_memory / (1024 ** 3)
+        else:
+            gpu_name = "CPU"
+            gpu_mem_gb = 0.0
+
+        return {
+            "device": str(self.device),
+            "dtype": str(self.amp_dtype),
+            "compile": str(self.config.project.compile),
+            "compile_mode": str(self.config.project.compile_mode),
+            "tf32": str(self.config.project.allow_tf32),
+            "gpu_name": gpu_name,
+            "gpu_mem_gb": f"{gpu_mem_gb:.1f}",
+            "cpu_threads": str(os.cpu_count() or 0),
+            "platform": platform.platform(),
+            "params_m": f"{count_parameters(self.base_model) / 1e6:.2f}",
+        }
+
+    def _estimate_initial_phase_time_seconds(self, phase: str) -> float:
+        """
+        Initial heuristic only.
+        Real ETA becomes much better after 1 to 2 epochs.
+        """
+        if phase == "phase1":
+            steps_per_epoch = max(math.ceil(self.config.phase1.teacher_samples_per_epoch / self.config.phase1.batch_size), 1)
+            total_steps = steps_per_epoch * self.config.phase1.epochs
+            # Heuristic for this model on a strong modern GPU
+            seconds_per_step = 0.020
+            return total_steps * seconds_per_step
+
+        steps_per_epoch = max(self.config.phase2.minibatches_per_epoch * self.config.phase2.update_epochs_per_cycle, 1)
+        total_steps = steps_per_epoch * self.config.phase2.epochs
+        # Includes self-play + training overhead
+        seconds_per_step = 0.080
+        return total_steps * seconds_per_step
+
+    def _log_run_header(self) -> None:
+        rt = self._runtime_snapshot()
+        phase1_eta = self._estimate_initial_phase_time_seconds("phase1")
+        phase2_eta = self._estimate_initial_phase_time_seconds("phase2")
+
+        self.logger.info("")
+        self.logger.info("=" * 72)
+        self.logger.info("NoshChessRLX Run Initialization")
+        self.logger.info("=" * 72)
+        self.logger.info(
+            "Device=%s | GPU=%s | VRAM=%sGB | DType=%s | Compile=%s (%s) | TF32=%s",
+            rt["device"],
+            rt["gpu_name"],
+            rt["gpu_mem_gb"],
+            rt["dtype"],
+            rt["compile"],
+            rt["compile_mode"],
+            rt["tf32"],
+        )
+        self.logger.info(
+            "CPU Threads=%s | Platform=%s",
+            rt["cpu_threads"],
+            rt["platform"],
+        )
+        self.logger.info(
+            "Model: Params=%sM | Blocks=%d | Channels=%d | InputPlanes=%d | ActionSize=%d",
+            rt["params_m"],
+            self.config.model.num_blocks,
+            self.config.model.channels,
+            self.config.model.input_planes,
+            self.config.model.action_size,
+        )
+        self.logger.info(
+            "Phase I: epochs=%d | batch=%d | lr=%g | teacher_samples=%d | teacher_games=%d",
+            self.config.phase1.epochs,
+            self.config.phase1.batch_size,
+            self.config.phase1.lr,
+            self.config.phase1.teacher_samples_per_epoch,
+            self.config.phase1.teacher_games_per_epoch,
+        )
+        self.logger.info(
+            "Phase II: epochs=%d | batch=%d | lr=%g | selfplay_games=%d | minibatches=%d | update_epochs=%d | replay=%d",
+            self.config.phase2.epochs,
+            self.config.phase2.batch_size,
+            self.config.phase2.lr,
+            self.config.phase2.selfplay_games_per_epoch,
+            self.config.phase2.minibatches_per_epoch,
+            self.config.phase2.update_epochs_per_cycle,
+            self.config.phase2.replay_buffer_capacity,
+        )
+        self.logger.info(
+            "MCTS: sims=%d | c_puct=%.2f | temp=%.2f->%.2f | root_noise=%s",
+            self.config.mcts.simulations,
+            self.config.mcts.c_puct,
+            self.config.mcts.temperature_start,
+            self.config.mcts.temperature_end,
+            str(self.config.mcts.root_noise),
+        )
+        self.logger.info(
+            "Teacher: enabled=%s | engine=%s | threads=%d | hash=%dMB | movetime=%dms | multipv=%d",
+            str(self.config.teacher.enabled),
+            self.config.teacher.engine_path,
+            self.config.teacher.threads,
+            self.config.teacher.hash_mb,
+            self.config.teacher.movetime_ms,
+            self.config.teacher.multipv,
+        )
+        self.logger.info(
+            "GAE: gamma=%.4f | lambda_init=%.3f | lambda_range=[%.2f, %.2f] | ema_beta=%.2f",
+            self.config.gae.gamma,
+            self.config.gae.lambda_init,
+            self.config.gae.lambda_min,
+            self.config.gae.lambda_max,
+            self.config.gae.ema_beta,
+        )
+        self.logger.info(
+            "Initial ETA Heuristic: Phase I=%s | Phase II=%s | Total=%s",
+            format_seconds(phase1_eta),
+            format_seconds(phase2_eta),
+            format_seconds(phase1_eta + phase2_eta),
+        )
+        self.logger.info("=" * 72)
+
+    def _table_separator(self) -> str:
+        return "+" + "-" * 7 + "+" + "-" * 8 + "+" + "-" * 11 + "+" + "-" * 11 + "+" + "-" * 10 + "+" + "-" * 11 + "+" + "-" * 11 + "+" + "-" * 10 + "+" + "-" * 10 + "+"
+
+    def _phase_table_header(self, phase: str, include_lambda: bool) -> None:
+        self.logger.info("")
+        self.logger.info("Phase %s live epoch table", phase)
+        if include_lambda:
+            self.logger.info(
+                self._table_separator()
+                + "\n| Epoch  | Loss   | PolLoss   | ValLoss   | TFLOPs   | Pos/s     | Nodes/s    | Time     | ETA      |\n"
+                + self._table_separator()
+            )
+        else:
+            self.logger.info(
+                self._table_separator()
+                + "\n| Epoch  | Loss   | PolLoss   | ValLoss   | TFLOPs   | Pos/s     | Nodes/s    | Time     | ETA      |\n"
+                + self._table_separator()
+            )
+
+    def _phase_table_row(
+        self,
+        epoch_display: str,
+        loss_total: float,
+        loss_policy: float,
+        loss_value: float,
+        tflops: float,
+        pos_per_s: float,
+        nodes_per_s: float,
+        epoch_time_s: float,
+        eta_s: float,
+    ) -> None:
+        self.logger.info(
+            "| {epoch:<5} | {loss:<6.4f} | {pol:<9.4f} | {val:<9.4f} | {tflops:<8.2f} | {pos:<9.1f} | {nodes:<9.1f} | {etime:<8} | {eta:<8} |".format(
+                epoch=epoch_display,
+                loss=loss_total,
+                pol=loss_policy,
+                val=loss_value,
+                tflops=tflops,
+                pos=pos_per_s,
+                nodes=nodes_per_s,
+                etime=format_seconds(epoch_time_s),
+                eta=format_seconds(eta_s),
+            )
+        )
+
+    # -------------------------------------------------------------------------
+    # Phase loops
+    # -------------------------------------------------------------------------
+
     def _run_phase1(self) -> None:
         self.logger.info("Starting Phase I distillation for %d epochs", self.config.phase1.epochs)
+        self._phase_table_header("I", include_lambda=False)
+
+        phase_start = time.perf_counter()
+        completed_epochs = 0
+
         for epoch in range(self.epoch_in_stage, self.config.phase1.epochs):
             self.current_stage = "phase1"
             self.epoch_in_stage = epoch
+            epoch_start = time.perf_counter()
+
             self._refresh_teacher_buffer()
             metrics = self._train_distillation_epoch(epoch)
+
+            epoch_time_s = time.perf_counter() - epoch_start
+            completed_epochs += 1
+            elapsed_phase_s = time.perf_counter() - phase_start
+            avg_epoch_s = elapsed_phase_s / max(completed_epochs, 1)
+            remaining_epochs = self.config.phase1.epochs - (epoch + 1)
+            eta_s = avg_epoch_s * remaining_epochs
+
             self.global_step += 1
             self.telemetry.log_metrics(self.global_step, {f"phase1/{k}": v for k, v in metrics.items()})
-            self.logger.info("Phase I epoch %d | loss=%.4f | positions/s=%.2f", epoch, metrics["loss_total"], metrics["positions_per_sec"])
+
+            self._phase_table_row(
+                epoch_display=f"{epoch + 1}/{self.config.phase1.epochs}",
+                loss_total=metrics["loss_total"],
+                loss_policy=metrics["loss_policy"],
+                loss_value=metrics["loss_value"],
+                tflops=metrics.get("tflops", 0.0),
+                pos_per_s=metrics.get("positions_per_sec", 0.0),
+                nodes_per_s=metrics.get("nodes_per_sec", 0.0),
+                epoch_time_s=epoch_time_s,
+                eta_s=eta_s,
+            )
+
+            self.logger.info(
+                "Phase I epoch %d summary | loss=%.4f | pol=%.4f | val=%.4f | entropy=%.4f | grad=%.4f | tflops=%.2f | pos/s=%.2f | epoch_time=%s | phase_eta=%s",
+                epoch + 1,
+                metrics["loss_total"],
+                metrics["loss_policy"],
+                metrics["loss_value"],
+                metrics["policy_entropy"],
+                metrics["grad_norm"],
+                metrics.get("tflops", 0.0),
+                metrics.get("positions_per_sec", 0.0),
+                format_seconds(epoch_time_s),
+                format_seconds(eta_s),
+            )
+
             self.epoch_in_stage = epoch + 1
             if (epoch + 1) % self.config.logging.checkpoint_every_epochs == 0:
                 self.save_checkpoint(emergency=False)
             self.maybe_periodic_emergency_save()
+
+        self.logger.info(self._table_separator())
         self.current_stage = "phase2"
         self.epoch_in_stage = 0
 
     def _run_phase2(self) -> None:
         self.logger.info("Starting Phase II self-play for %d epochs", self.config.phase2.epochs)
+        self._phase_table_header("II", include_lambda=True)
+
+        phase_start = time.perf_counter()
+        completed_epochs = 0
+
         for epoch in range(self.epoch_in_stage, self.config.phase2.epochs):
             self.current_stage = "phase2"
             self.epoch_in_stage = epoch
+            epoch_start = time.perf_counter()
+
             teacher_ratio = self.phase2_teacher_ratio(epoch)
             if teacher_ratio > 0.0:
                 self._refresh_teacher_buffer(limit=max(self.config.phase1.teacher_samples_per_epoch // 2, 2048))
+
             collection_metrics = self._collect_selfplay_epoch(teacher_ratio=teacher_ratio)
             training_metrics = self._train_selfplay_epoch(epoch, teacher_ratio=teacher_ratio)
-            metrics = {**collection_metrics, **training_metrics, "teacher_ratio": teacher_ratio, "adaptive_lambda": self.adaptive_gae.current_lambda}
+
+            metrics = {
+                **collection_metrics,
+                **training_metrics,
+                "teacher_ratio": teacher_ratio,
+                "adaptive_lambda": self.adaptive_gae.current_lambda,
+            }
+
             if teacher_ratio > 0.0:
-                distill_metrics = self._train_distillation_epoch(epoch, max_batches=max(2, self.config.phase2.minibatches_per_epoch // 8), log_prefix="phase2_distill")
+                distill_metrics = self._train_distillation_epoch(
+                    epoch,
+                    max_batches=max(2, self.config.phase2.minibatches_per_epoch // 8),
+                    log_prefix="phase2_distill",
+                )
                 metrics.update({f"distill_{k}": v for k, v in distill_metrics.items()})
+
+            epoch_time_s = time.perf_counter() - epoch_start
+            completed_epochs += 1
+            elapsed_phase_s = time.perf_counter() - phase_start
+            avg_epoch_s = elapsed_phase_s / max(completed_epochs, 1)
+            remaining_epochs = self.config.phase2.epochs - (epoch + 1)
+            eta_s = avg_epoch_s * remaining_epochs
+
             self.global_step += 1
             self.telemetry.log_metrics(self.global_step, {f"phase2/{k}": v for k, v in metrics.items()})
-            self.epoch_in_stage = epoch + 1
-            self.logger.info(
-                "Phase II epoch %d | loss=%.4f | lambda=%.4f | pos/s=%.2f | nodes/s=%.2f",
-                epoch,
-                metrics["loss_total"],
-                metrics["adaptive_lambda"],
-                metrics["positions_per_sec"],
-                metrics["nodes_per_sec"],
+
+            self._phase_table_row(
+                epoch_display=f"{epoch + 1}/{self.config.phase2.epochs}",
+                loss_total=metrics["loss_total"],
+                loss_policy=metrics["loss_policy"],
+                loss_value=metrics["loss_value"],
+                tflops=metrics.get("tflops", 0.0),
+                pos_per_s=metrics.get("positions_per_sec", 0.0),
+                nodes_per_s=metrics.get("nodes_per_sec", 0.0),
+                epoch_time_s=epoch_time_s,
+                eta_s=eta_s,
             )
+
+            self.logger.info(
+                "Phase II epoch %d summary | loss=%.4f | pol=%.4f | val=%.4f | search=%.4f | entropy=%.4f | grad=%.4f | tflops=%.2f | lambda=%.4f | pos/s=%.2f | nodes/s=%.2f | teacher_ratio=%.3f | epoch_time=%s | phase_eta=%s",
+                epoch + 1,
+                metrics["loss_total"],
+                metrics["loss_policy"],
+                metrics["loss_value"],
+                metrics["loss_search"],
+                metrics["policy_entropy"],
+                metrics["grad_norm"],
+                metrics.get("tflops", 0.0),
+                metrics["adaptive_lambda"],
+                metrics.get("positions_per_sec", 0.0),
+                metrics.get("nodes_per_sec", 0.0),
+                teacher_ratio,
+                format_seconds(epoch_time_s),
+                format_seconds(eta_s),
+            )
+
+            self.epoch_in_stage = epoch + 1
+
             if (epoch + 1) % self.config.eval.every_n_epochs == 0:
                 elo = self._evaluate_projected_elo()
                 self.telemetry.log_metrics(self.global_step, {"phase2/projected_elo": elo})
@@ -293,9 +568,16 @@ class HybridTrainer:
                     self.best_projected_elo = elo
                     best_path = self.root_dir / "checkpoints" / "best" / "best_model.pt"
                     atomic_torch_save({"model_state_dict": self.base_model.state_dict(), "projected_elo": elo}, best_path)
+
             if (epoch + 1) % self.config.logging.checkpoint_every_epochs == 0:
                 self.save_checkpoint(emergency=False)
             self.maybe_periodic_emergency_save()
+
+        self.logger.info(self._table_separator())
+
+    # -------------------------------------------------------------------------
+    # Data refresh and loaders
+    # -------------------------------------------------------------------------
 
     def _refresh_teacher_buffer(self, limit: Optional[int] = None) -> None:
         teacher = self._maybe_open_teacher()
@@ -303,6 +585,7 @@ class HybridTrainer:
             return
         target_samples = int(limit or self.config.phase1.teacher_samples_per_epoch)
         samples: List[TeacherSample] = []
+
         for _ in range(self.config.phase1.teacher_games_per_epoch):
             board = chess.Board()
             random_opening_plies = np.random.randint(0, 6)
@@ -311,6 +594,7 @@ class HybridTrainer:
                     break
                 move = np.random.choice(list(board.legal_moves))
                 board.push(move)
+
             while not board.is_game_over(claim_draw=True) and len(samples) < target_samples and board.ply() < self.config.phase1.max_teacher_game_plies:
                 analysis = teacher.analyze(board)
                 sample = TeacherSample(
@@ -320,6 +604,7 @@ class HybridTrainer:
                     value_target=analysis.value,
                 )
                 samples.append(sample)
+
                 if analysis.policy.indices.size > 1:
                     move_index = int(np.random.choice(analysis.policy.indices, p=analysis.policy.probs))
                     move = self.move_encoder.index_to_move(move_index)
@@ -327,9 +612,12 @@ class HybridTrainer:
                         move = analysis.best_move
                 else:
                     move = analysis.best_move
+
                 board.push(move)
+
             if len(samples) >= target_samples:
                 break
+
         self.teacher_buffer.extend([item.to_dict() for item in samples])
 
     def _loader_kwargs(self) -> Dict:
@@ -343,19 +631,42 @@ class HybridTrainer:
             kwargs["prefetch_factor"] = self.config.hardware.prefetch_factor
         return kwargs
 
+    # -------------------------------------------------------------------------
+    # Training
+    # -------------------------------------------------------------------------
+
     def _train_distillation_epoch(self, epoch: int, max_batches: Optional[int] = None, log_prefix: str = "phase1") -> Dict[str, float]:
         if len(self.teacher_buffer) == 0:
             raise RuntimeError("Teacher buffer is empty. Generate teacher data before training.")
+
         items = [TeacherSample.from_dict(item) for item in self.teacher_buffer.sample(self.config.phase1.teacher_samples_per_epoch)]
         dataset = TeacherDataset(items, self.move_encoder.action_size)
-        loader = DataLoader(dataset, batch_size=self.config.phase1.batch_size, shuffle=True, drop_last=False, **self._loader_kwargs())
+        loader = DataLoader(
+            dataset,
+            batch_size=self.config.phase1.batch_size,
+            shuffle=True,
+            drop_last=False,
+            **self._loader_kwargs(),
+        )
+
         self.model.train()
         meter = ThroughputMeter()
-        sums = {"loss_total": 0.0, "loss_policy": 0.0, "loss_value": 0.0, "policy_entropy": 0.0, "grad_norm": 0.0, "tflops": 0.0}
+        sums = {
+            "loss_total": 0.0,
+            "loss_policy": 0.0,
+            "loss_value": 0.0,
+            "policy_entropy": 0.0,
+            "grad_norm": 0.0,
+            "tflops": 0.0,
+            "nodes_per_sec": 0.0,
+        }
         profiled = False
+        batch_count = 0
+
         for batch_idx, batch in enumerate(loader):
             if max_batches is not None and batch_idx >= max_batches:
                 break
+
             batch = to_device(batch, self.device)
             states = batch["states"]
             policy_targets = batch["policy_targets"]
@@ -376,6 +687,7 @@ class HybridTrainer:
 
             self.optimizer.zero_grad(set_to_none=True)
             autocast_enabled = self.device.type == "cuda" and self.amp_dtype in (torch.float16, torch.bfloat16)
+
             with torch.autocast(device_type=self.device.type, dtype=self.amp_dtype, enabled=autocast_enabled):
                 output = self.model(states)
                 policy_log_probs = F.log_softmax(output.policy_logits, dim=-1)
@@ -409,8 +721,9 @@ class HybridTrainer:
             sums["policy_entropy"] += float(entropy.item())
             sums["grad_norm"] += float(grad_norm)
             sums["tflops"] += tflops
+            batch_count += 1
 
-        steps = max(batch_idx + 1, 1)
+        steps = max(batch_count, 1)
         metrics = {key: value / steps for key, value in sums.items()}
         metrics.update(meter.summary())
         metrics.update(device_metrics(self.device))
@@ -419,12 +732,14 @@ class HybridTrainer:
     def _policy_and_value(self, board: chess.Board) -> Tuple[np.ndarray, float]:
         self.model.eval()
         state = torch.from_numpy(self.board_encoder.encode(board)).unsqueeze(0).to(self.device)
+
         with torch.no_grad():
             autocast_enabled = self.device.type == "cuda" and self.amp_dtype in (torch.float16, torch.bfloat16)
             with torch.autocast(device_type=self.device.type, dtype=self.amp_dtype, enabled=autocast_enabled):
                 output = self.model(state)
             logits = output.policy_logits[0]
             value = float(output.value[0].cpu().item())
+
         legal_mask = self.move_encoder.legal_mask(board).to(logits.device)
         probs = torch.softmax(logits.masked_fill(~legal_mask, float("-inf")), dim=-1)
         return probs.cpu().to(torch.float32).numpy(), value
@@ -440,6 +755,7 @@ class HybridTrainer:
             board = chess.Board()
             episode: List[SelfPlayTransition] = []
             random_opening_plies = np.random.randint(0, 6)
+
             for _ in range(random_opening_plies):
                 if board.is_game_over(claim_draw=True):
                     break
@@ -451,11 +767,13 @@ class HybridTrainer:
                 raw_policy, value_pred = self._policy_and_value(board)
                 search = mcts.run(board, ply=board.ply())
                 meter.update(positions=1, nodes=search.nodes)
+
                 action = search.action
                 move = self.move_encoder.index_to_move(action)
                 if move not in board.legal_moves:
                     move = next(iter(board.legal_moves))
                     action = self.move_encoder.move_to_index(move)
+
                 dense_reward = 0.0
                 if teacher is not None:
                     before = teacher.analyze(board)
@@ -466,12 +784,19 @@ class HybridTrainer:
                     if not next_board.is_game_over(claim_draw=True):
                         after = teacher.analyze(next_board)
                         after_cp = after.cp
-                    dense_reward = self.reward_shaper.dense_reward(before.cp, after_cp, action_matches, 3 if board.is_repetition(3) else 1)
+                    dense_reward = self.reward_shaper.dense_reward(
+                        before.cp,
+                        after_cp,
+                        action_matches,
+                        3 if board.is_repetition(3) else 1,
+                    )
+
                 behavior_log_prob = float(np.log(max(raw_policy[action], 1e-9)))
                 board.push(move)
                 terminal = self.reward_shaper.terminal_reward(board, actor_color, board.ply())
                 reward = teacher_ratio * dense_reward + terminal.reward
                 next_state = None if terminal.terminal else self.board_encoder.encode(board)
+
                 episode.append(
                     SelfPlayTransition(
                         state=state,
@@ -486,6 +811,7 @@ class HybridTrainer:
                         player_sign=1.0 if actor_color == chess.WHITE else -1.0,
                     )
                 )
+
                 if terminal.terminal:
                     if terminal.is_draw:
                         draws += 1
@@ -504,6 +830,7 @@ class HybridTrainer:
             all_transitions.extend(episode)
 
         self.selfplay_buffer.extend([item.to_dict() for item in all_transitions])
+
         summary = meter.summary()
         total_games = max(self.config.phase2.selfplay_games_per_epoch, 1)
         summary.update(
@@ -520,24 +847,31 @@ class HybridTrainer:
     def _compute_advantages(self, episode: Sequence[SelfPlayTransition]) -> None:
         if not episode:
             return
+
         gamma = self.config.gae.gamma
         values = np.array([t.value_pred for t in episode], dtype=np.float32)
         next_values = np.zeros_like(values)
+
         for idx, transition in enumerate(episode[:-1]):
             next_values[idx] = -episode[idx + 1].value_pred
             if transition.done:
                 next_values[idx] = 0.0
         next_values[-1] = 0.0
+
         rewards = np.array([t.reward for t in episode], dtype=np.float32)
         dones = np.array([t.done for t in episode], dtype=np.float32)
         td_errors = rewards + gamma * (1.0 - dones) * next_values - values
+
         lam = self.adaptive_gae.update(values, td_errors)
         advantages = np.zeros_like(values)
         gae = 0.0
+
         for idx in reversed(range(len(episode))):
             gae = td_errors[idx] + gamma * lam * (1.0 - dones[idx]) * gae
             advantages[idx] = gae
+
         returns = advantages + values
+
         for idx, transition in enumerate(episode):
             transition.advantage = float(advantages[idx])
             transition.return_target = float(returns[idx])
@@ -545,14 +879,26 @@ class HybridTrainer:
     def _train_selfplay_epoch(self, epoch: int, teacher_ratio: float) -> Dict[str, float]:
         if len(self.selfplay_buffer) == 0:
             raise RuntimeError("Self-play buffer is empty. Collect self-play before training.")
-        sample_count = min(len(self.selfplay_buffer), self.config.phase2.batch_size * self.config.phase2.minibatches_per_epoch)
+
+        sample_count = min(
+            len(self.selfplay_buffer),
+            self.config.phase2.batch_size * self.config.phase2.minibatches_per_epoch,
+        )
         items = [SelfPlayTransition.from_dict(item) for item in self.selfplay_buffer.sample(sample_count)]
+
         advantages = np.array([item.advantage for item in items], dtype=np.float32)
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         for idx, item in enumerate(items):
             item.advantage = float(advantages[idx])
+
         dataset = SelfPlayDataset(items, self.move_encoder.action_size)
-        loader = DataLoader(dataset, batch_size=self.config.phase2.batch_size, shuffle=True, drop_last=False, **self._loader_kwargs())
+        loader = DataLoader(
+            dataset,
+            batch_size=self.config.phase2.batch_size,
+            shuffle=True,
+            drop_last=False,
+            **self._loader_kwargs(),
+        )
 
         self.model.train()
         sums = {
@@ -563,8 +909,12 @@ class HybridTrainer:
             "policy_entropy": 0.0,
             "grad_norm": 0.0,
             "tflops": 0.0,
+            "positions_per_sec": 0.0,
+            "nodes_per_sec": 0.0,
         }
         profiled = False
+        batch_count = 0
+
         for update_epoch in range(self.config.phase2.update_epochs_per_cycle):
             for batch_idx, batch in enumerate(loader):
                 batch = to_device(batch, self.device)
@@ -591,6 +941,7 @@ class HybridTrainer:
 
                 self.optimizer.zero_grad(set_to_none=True)
                 autocast_enabled = self.device.type == "cuda" and self.amp_dtype in (torch.float16, torch.bfloat16)
+
                 with torch.autocast(device_type=self.device.type, dtype=self.amp_dtype, enabled=autocast_enabled):
                     output = self.model(states)
                     log_probs = F.log_softmax(output.policy_logits, dim=-1)
@@ -628,11 +979,16 @@ class HybridTrainer:
                 sums["policy_entropy"] += float(entropy.item())
                 sums["grad_norm"] += float(grad_norm)
                 sums["tflops"] += tflops
+                batch_count += 1
 
-        steps = max(self.config.phase2.update_epochs_per_cycle * max(len(loader), 1), 1)
+        steps = max(batch_count, 1)
         metrics = {key: value / steps for key, value in sums.items()}
         metrics.update(device_metrics(self.device))
         return metrics
+
+    # -------------------------------------------------------------------------
+    # Evaluation
+    # -------------------------------------------------------------------------
 
     def _agent_move(self, board: chess.Board, mcts: MCTS) -> chess.Move:
         search = mcts.run(board, board.ply())
@@ -646,21 +1002,25 @@ class HybridTrainer:
         teacher_cfg.movetime_ms = self.config.eval.baseline_movetime_ms
         score = 0.0
         mcts = MCTS(self.model, self.board_encoder, self.move_encoder, self.config.mcts, self.device, self.amp_dtype)
+
         with StockfishTeacher(teacher_cfg, self.move_encoder) as opponent:
             for game_idx in range(self.config.eval.arena_games):
                 board = chess.Board()
                 agent_color = chess.WHITE if game_idx % 2 == 0 else chess.BLACK
+
                 while not board.is_game_over(claim_draw=True) and board.ply() < self.config.eval.max_game_plies:
                     if board.turn == agent_color:
                         move = self._agent_move(board, mcts)
                     else:
                         move = opponent.analyze(board).best_move
                     board.push(move)
+
                 outcome = board.outcome(claim_draw=True)
                 if outcome is None or outcome.winner is None:
                     score += 0.5
                 elif outcome.winner == agent_color:
                     score += 1.0
+
         score_fraction = score / max(self.config.eval.arena_games, 1)
         elo = projected_elo(score_fraction, self.config.eval.opponent_elo)
         self.logger.info("Projected Elo %.1f from score fraction %.3f", elo, score_fraction)
