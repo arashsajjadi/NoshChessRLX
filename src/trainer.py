@@ -122,6 +122,7 @@ class HybridTrainer:
         self.model = PolicyValueNet(self.config.model).to(self.device)
         self.model = maybe_compile(self.model, self.config)
         self.base_model = self._unwrap_model(self.model)
+        self.model_param_count = count_parameters(self.base_model)
         self.optimizer = self._build_optimizer(stage="phase1")
         self.scaler = self._build_grad_scaler()
         self.teacher_buffer = RingBuffer(capacity=max(self.config.phase1.teacher_samples_per_epoch * 4, 50000))
@@ -139,6 +140,7 @@ class HybridTrainer:
         }
         self._profiled_tflops: Dict[str, bool] = {"phase1": False, "phase2": False}
         self._phase_tflops_estimate: Dict[str, float] = {"phase1": 0.0, "phase2": 0.0}
+        self._logged_tflops_mode: Dict[str, bool] = {"phase1": False, "phase2": False}
         self._phase1_move_injection_probs = self._normalized_phase1_move_injection_probs()
 
         self._log_run_header()
@@ -270,6 +272,7 @@ class HybridTrainer:
         self._recent_epoch_times["phase2"].clear()
         self._profiled_tflops = {"phase1": False, "phase2": False}
         self._phase_tflops_estimate = {"phase1": 0.0, "phase2": 0.0}
+        self._logged_tflops_mode = {"phase1": False, "phase2": False}
         self.logger.info(
             "Loaded weight-only initialization from %s | target_stage=%s | optimizer/scaler/buffers reset",
             path,
@@ -325,7 +328,7 @@ class HybridTrainer:
             "gpu_mem_gb": f"{gpu_mem_gb:.1f}",
             "cpu_threads": str(torch.get_num_threads()),
             "platform": platform.platform(),
-            "params_m": f"{count_parameters(self.base_model) / 1e6:.2f}",
+            "params_m": f"{self.model_param_count / 1e6:.2f}",
         }
 
     def _estimate_initial_phase_time_seconds(self, phase: str) -> float:
@@ -585,6 +588,31 @@ class HybridTrainer:
             self._profiled_tflops[stage] = True
             self._phase_tflops_estimate[stage] = measured_tflops
 
+    def _heuristic_tflops_from_positions(self, positions_per_sec: float) -> float:
+        if positions_per_sec <= 0.0:
+            return 0.0
+        # Rough training FLOPs estimate: forward+backward scale from parameter count.
+        flops_per_position = float(self.model_param_count) * 6.0
+        tflops = (positions_per_sec * flops_per_position) / 1.0e12
+        return float(max(tflops, 0.0))
+
+    def _resolve_tflops(self, stage: str, positions_per_sec: float) -> float:
+        profiled = float(self._phase_tflops_estimate.get(stage, 0.0))
+        if profiled > 0.0:
+            if not self._logged_tflops_mode[stage]:
+                self.logger.info("%s TFLOPs source: profiler estimate.", stage.upper())
+                self._logged_tflops_mode[stage] = True
+            return profiled
+
+        heuristic = self._heuristic_tflops_from_positions(positions_per_sec)
+        if not self._logged_tflops_mode[stage]:
+            self.logger.info(
+                "%s TFLOPs source: throughput heuristic (approximate, profiler unavailable/disabled).",
+                stage.upper(),
+            )
+            self._logged_tflops_mode[stage] = True
+        return heuristic
+
     # -------------------------------------------------------------------------
     # Phase loops
     # -------------------------------------------------------------------------
@@ -606,7 +634,7 @@ class HybridTrainer:
             target_phase1_epochs,
         )
         if not self.config.run.profile:
-            self.logger.info("TFLOPs profiling disabled (run.profile=false); table will report 0.00 estimates.")
+            self.logger.info("TFLOPs profiler disabled (run.profile=false); table will use throughput-based estimates.")
         self._phase_table_header("I")
         self._recent_epoch_times["phase1"].clear()
 
@@ -665,7 +693,7 @@ class HybridTrainer:
     def _run_phase2(self) -> None:
         self.logger.info("Starting Phase II self-play for %d epochs", self.config.phase2.epochs)
         if not self.config.run.profile:
-            self.logger.info("TFLOPs profiling disabled (run.profile=false); table will report 0.00 estimates.")
+            self.logger.info("TFLOPs profiler disabled (run.profile=false); table will use throughput-based estimates.")
         self._phase_table_header("II")
         self._recent_epoch_times["phase2"].clear()
 
@@ -930,8 +958,9 @@ class HybridTrainer:
 
         steps = max(batch_count, 1)
         metrics = {key: value / steps for key, value in sums.items()}
-        metrics["tflops"] = float(self._phase_tflops_estimate.get(self.current_stage, 0.0))
-        metrics.update(meter.summary())
+        throughput = meter.summary()
+        metrics.update(throughput)
+        metrics["tflops"] = self._resolve_tflops(self.current_stage, metrics.get("positions_per_sec", 0.0))
         metrics.update(device_metrics(self.device))
         return metrics
 
@@ -1107,6 +1136,8 @@ class HybridTrainer:
         )
 
         self.model.train()
+        train_start = time.perf_counter()
+        positions_seen = 0
         sums = {
             "loss_total": 0.0,
             "loss_policy": 0.0,
@@ -1125,6 +1156,7 @@ class HybridTrainer:
                 returns = batch["returns"]
                 search_policy = batch["search_policy"]
                 advantages_batch = batch["advantages"]
+                positions_seen += int(states.size(0))
 
                 def forward_only() -> torch.Tensor:
                     output = self.model(states)
@@ -1182,7 +1214,9 @@ class HybridTrainer:
 
         steps = max(batch_count, 1)
         metrics = {key: value / steps for key, value in sums.items()}
-        metrics["tflops"] = float(self._phase_tflops_estimate.get(self.current_stage, 0.0))
+        elapsed_s = max(time.perf_counter() - train_start, 1e-8)
+        metrics["positions_per_sec"] = positions_seen / elapsed_s
+        metrics["tflops"] = self._resolve_tflops(self.current_stage, metrics["positions_per_sec"])
         metrics.update(device_metrics(self.device))
         return metrics
 
