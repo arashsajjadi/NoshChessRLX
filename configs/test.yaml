@@ -1,0 +1,126 @@
+project:
+  name: chess_hybrid_rl
+  seed: 42
+  output_dir: ./chess_hybrid_rl_runs
+  verbosity: info
+  device: auto
+  dtype: bf16
+  compile: false
+  compile_mode: reduce-overhead
+  allow_tf32: true
+
+hardware:
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  cudnn_benchmark: true
+  gradient_accumulation_steps: 1
+
+run:
+  stage: full
+  continue_from: ""
+  clear_cache: false
+  safe_save_on_error: true
+  profile: true
+
+teacher:
+  enabled: true
+  engine_path: /usr/games/stockfish
+  threads: 16
+  hash_mb: 2048
+  movetime_ms: 30
+  depth: null
+  multipv: 4
+  cp_to_value_scale: 600.0
+  policy_temperature: 80.0
+
+phase1:
+  epochs: 1
+  batch_size: 64
+  lr: 0.0003
+  weight_decay: 0.0001
+  label_smoothing: 0.0
+  policy_loss_weight: 1.0
+  value_loss_weight: 0.5
+  entropy_weight: 0.001
+  teacher_samples_per_epoch: 12000
+  teacher_games_per_epoch: 32
+  max_teacher_game_plies: 100
+
+phase2:
+  epochs: 1
+  batch_size: 64
+  lr: 0.00015
+  weight_decay: 0.0001
+  value_loss_weight: 1.0
+  policy_loss_weight: 1.0
+  search_loss_weight: 1.0
+  entropy_weight: 0.0005
+  replay_buffer_capacity: 200000
+  selfplay_games_per_epoch: 32
+  max_game_plies: 200
+  update_epochs_per_cycle: 4
+  minibatches_per_epoch: 32
+
+curriculum:
+  overlap_start_epoch: 0
+  overlap_span_epochs: 1
+  teacher_ratio_start: 1.0
+  teacher_ratio_end: 0.0
+  kl_anchor_weight_start: 0.02
+  kl_anchor_weight_end: 0.0
+
+reward:
+  gamma: 0.997
+  cp_delta_scale: 120.0
+  w_cp: 0.60
+  w_match: 0.25
+  w_terminal: 0.15
+  w_stall: 0.02
+  draw_penalty: true
+  draw_base: 0.15
+  draw_tau: 80.0
+  repetition_penalty: 0.03
+
+gae:
+  gamma: 0.997
+  lambda_min: 0.80
+  lambda_max: 0.97
+  lambda_init: 0.92
+  ema_beta: 0.90
+  k_noise: 0.12
+  k_value_var: 0.05
+
+mcts:
+  simulations: 16
+  c_puct: 1.75
+  dirichlet_alpha: 0.30
+  dirichlet_eps: 0.25
+  temperature_start: 1.00
+  temperature_end: 0.10
+  temperature_decay_plies: 20
+  root_noise: true
+
+model:
+  input_planes: 18
+  channels: 128
+  num_blocks: 10
+  value_head_hidden: 256
+  dropout: 0.0
+  action_size: 20480
+
+eval:
+  every_n_epochs: 5
+  arena_games: 8
+  opponent_elo: 2900.0
+  baseline_movetime_ms: 20
+  max_game_plies: 160
+
+logging:
+  log_every_steps: 20
+  checkpoint_every_epochs: 1
+  emergency_checkpoint_every_minutes: 15
+  tensorboard: true
+  jsonl: true
+  profile_every_steps: 200
