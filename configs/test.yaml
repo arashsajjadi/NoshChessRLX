@@ -1,5 +1,5 @@
 project:
-  name: chess_hybrid_rl
+  name: NoshChessRLX_LearningTest
   seed: 42
   output_dir: ./chess_hybrid_rl_runs
   verbosity: info
@@ -22,7 +22,7 @@ run:
   continue_from: ""
   clear_cache: false
   safe_save_on_error: true
-  profile: true
+  profile: false  # پروفایل خاموش شد تا لاگ‌های اضافه سرعت را کم نکنند
 
 teacher:
   enabled: true
@@ -36,36 +36,36 @@ teacher:
   policy_temperature: 80.0
 
 phase1:
-  epochs: 1
-  batch_size: 64
+  epochs: 5               # افزایش به 5 برای دیدن روند کاهش Loss
+  batch_size: 256         # افزایش بچ‌سایز برای استفاده بهتر از گرافیک
   lr: 0.0003
   weight_decay: 0.0001
   label_smoothing: 0.0
   policy_loss_weight: 1.0
   value_loss_weight: 0.5
   entropy_weight: 0.001
-  teacher_samples_per_epoch: 12000
-  teacher_games_per_epoch: 32
+  teacher_samples_per_epoch: 4000  # کاهش سمپل‌ها تا هر اپوک سریع‌تر تمام شود
+  teacher_games_per_epoch: 8       # کاهش تعداد بازی در هر اپوک
   max_teacher_game_plies: 100
 
 phase2:
-  epochs: 1
-  batch_size: 64
+  epochs: 5               # افزایش به 5 برای دیدن روند خودآموزی
+  batch_size: 256
   lr: 0.00015
   weight_decay: 0.0001
   value_loss_weight: 1.0
   policy_loss_weight: 1.0
   search_loss_weight: 1.0
   entropy_weight: 0.0005
-  replay_buffer_capacity: 200000
-  selfplay_games_per_epoch: 32
-  max_game_plies: 200
-  update_epochs_per_cycle: 4
-  minibatches_per_epoch: 32
+  replay_buffer_capacity: 50000    # بافر کوچکتر برای تست
+  selfplay_games_per_epoch: 8      # بازی‌های کمتر برای سرعت بیشتر
+  max_game_plies: 150
+  update_epochs_per_cycle: 2
+  minibatches_per_epoch: 16
 
 curriculum:
   overlap_start_epoch: 0
-  overlap_span_epochs: 1
+  overlap_span_epochs: 5           # کاهش هدایت استاد طی این 5 اپوک
   teacher_ratio_start: 1.0
   teacher_ratio_end: 0.0
   kl_anchor_weight_start: 0.02
@@ -93,7 +93,7 @@ gae:
   k_value_var: 0.05
 
 mcts:
-  simulations: 16
+  simulations: 32         # کمی بیشتر از 16 برای کیفیت بهتر اما همچنان سریع
   c_puct: 1.75
   dirichlet_alpha: 0.30
   dirichlet_eps: 0.25
@@ -111,16 +111,16 @@ model:
   action_size: 20480
 
 eval:
-  every_n_epochs: 5
-  arena_games: 8
+  every_n_epochs: 5       # در اپوک آخر یک ارزیابی انجام می‌شود
+  arena_games: 4          # 4 بازی برای ارزیابی سریع
   opponent_elo: 2900.0
   baseline_movetime_ms: 20
   max_game_plies: 160
 
 logging:
-  log_every_steps: 20
-  checkpoint_every_epochs: 1
+  log_every_steps: 10     # لاگ‌گیری سریع‌تر برای دیدن جزئیات
+  checkpoint_every_epochs: 5
   emergency_checkpoint_every_minutes: 15
   tensorboard: true
   jsonl: true
-  profile_every_steps: 200
+  profile_every_steps: 0

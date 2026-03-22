@@ -1,0 +1,770 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NoshChessRLX Analysis Board</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <style>
+        :root {
+            --bg: #0f1117;
+            --panel: #171b24;
+            --panel-2: #1d2330;
+            --accent: #6ea8fe;
+            --accent-2: #7ef0c5;
+            --text: #eef3fb;
+            --muted: #9ca8bd;
+            --danger: #ff6b6b;
+            --good: #79e6a8;
+            --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+            --border: rgba(255, 255, 255, 0.08);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: radial-gradient(circle at top, #1a2030 0%, var(--bg) 55%);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .shell {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        .hero {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .hero h1 {
+            margin: 0;
+            font-size: 1.9rem;
+            letter-spacing: 0.02em;
+        }
+
+        .hero p {
+            margin: 6px 0 0;
+            color: var(--muted);
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: minmax(340px, 760px) minmax(320px, 1fr);
+            gap: 24px;
+            align-items: start;
+        }
+
+        .board-card,
+        .sidebar,
+        .controls {
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            box-shadow: var(--shadow);
+        }
+
+        .board-card {
+            padding: 22px;
+        }
+
+        .board-wrap {
+            display: grid;
+            grid-template-columns: 28px minmax(280px, 720px);
+            gap: 16px;
+            align-items: stretch;
+        }
+
+        .eval-bar {
+            position: relative;
+            border-radius: 18px;
+            overflow: hidden;
+            background: #10141c;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            min-height: 520px;
+        }
+
+        .eval-bar__white {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: linear-gradient(180deg, #f9fbff, #d8e0ec);
+            transition: height 220ms ease;
+            height: 50%;
+        }
+
+        .eval-bar__marker {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: rgba(110, 168, 254, 0.95);
+            box-shadow: 0 0 14px rgba(110, 168, 254, 0.75);
+            transition: bottom 220ms ease;
+            bottom: calc(50% - 1px);
+        }
+
+        .eval-label {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.78rem;
+            font-weight: 700;
+            z-index: 2;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            user-select: none;
+            color: #111827;
+        }
+
+        .eval-label--top {
+            top: 10px;
+            color: #f3f4f6;
+        }
+
+        .eval-label--bottom {
+            bottom: 10px;
+        }
+
+        .board-shell {
+            position: relative;
+        }
+
+        #board {
+            width: 100%;
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        .board-overlay {
+            position: absolute;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(13, 17, 23, 0.58);
+            border-radius: 14px;
+            backdrop-filter: blur(3px);
+            z-index: 10;
+        }
+
+        .board-overlay.active {
+            display: flex;
+        }
+
+        .thinking-pill {
+            padding: 12px 18px;
+            border-radius: 999px;
+            background: rgba(17, 24, 39, 0.82);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text);
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+
+        .sidebar {
+            padding: 20px;
+            display: grid;
+            gap: 16px;
+        }
+
+        .controls {
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 14px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            font-size: 0.96rem;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: var(--accent-2);
+            box-shadow: 0 0 12px rgba(126, 240, 197, 0.8);
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .field label {
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+
+        .field input {
+            min-width: 112px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--panel);
+            color: var(--text);
+            outline: none;
+        }
+
+        .btn {
+            border: 0;
+            border-radius: 14px;
+            padding: 11px 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent), #5ef6e8);
+            color: #08111d;
+            box-shadow: 0 14px 28px rgba(110, 168, 254, 0.22);
+        }
+
+        .btn-secondary {
+            background: var(--panel);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 16px;
+        }
+
+        .panel h2,
+        .panel h3 {
+            margin: 0 0 12px;
+            font-size: 1rem;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(120px, 1fr));
+            gap: 12px;
+        }
+
+        .metric {
+            padding: 12px;
+            border-radius: 16px;
+            background: var(--panel-2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .metric .label {
+            color: var(--muted);
+            font-size: 0.82rem;
+            margin-bottom: 4px;
+        }
+
+        .metric .value {
+            font-size: 1.08rem;
+            font-weight: 700;
+        }
+
+        .classification-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 12px;
+            border-radius: 999px;
+            background: rgba(126, 240, 197, 0.14);
+            border: 1px solid rgba(126, 240, 197, 0.3);
+            font-weight: 700;
+        }
+
+        .classification-pill.blunder {
+            background: rgba(255, 107, 107, 0.12);
+            border-color: rgba(255, 107, 107, 0.26);
+        }
+
+        .classification-pill.inaccuracy {
+            background: rgba(255, 191, 71, 0.12);
+            border-color: rgba(255, 191, 71, 0.26);
+        }
+
+        .move-list {
+            display: grid;
+            gap: 6px;
+            max-height: 240px;
+            overflow: auto;
+            padding-right: 4px;
+        }
+
+        .move-row {
+            display: grid;
+            grid-template-columns: 48px 1fr 1fr;
+            gap: 10px;
+            padding: 10px 12px;
+            background: var(--panel-2);
+            border-radius: 12px;
+            font-size: 0.95rem;
+        }
+
+        .pv-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .pv-item {
+            padding: 12px;
+            border-radius: 14px;
+            background: var(--panel-2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .pv-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            color: var(--muted);
+            font-size: 0.84rem;
+            margin-bottom: 6px;
+        }
+
+        .pv-san {
+            font-size: 0.96rem;
+            line-height: 1.45;
+        }
+
+        .error-banner {
+            display: none;
+            background: rgba(255, 107, 107, 0.16);
+            border: 1px solid rgba(255, 107, 107, 0.3);
+            color: #ffd6d6;
+            padding: 12px 14px;
+            border-radius: 14px;
+        }
+
+        .error-banner.visible {
+            display: block;
+        }
+
+        @media (max-width: 1120px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 700px) {
+            .shell {
+                padding: 14px;
+            }
+
+            .board-wrap {
+                grid-template-columns: 22px 1fr;
+                gap: 10px;
+            }
+
+            .eval-bar {
+                min-height: 360px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <div class="hero">
+        <div>
+            <h1>NoshChessRLX Analysis Board</h1>
+            <p>Play against your RTX 5080 powered model and compare every move against Stockfish 17.</p>
+        </div>
+        <div class="status">
+            <span class="dot"></span>
+            <span id="status-text">Ready</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="field">
+            <label for="simulations-input">MCTS simulations</label>
+            <input id="simulations-input" type="number" min="1" step="1" value="{{ default_simulations }}">
+        </div>
+        <button id="new-game-btn" class="btn btn-primary" type="button">New game</button>
+        <button id="refresh-btn" class="btn btn-secondary" type="button">Refresh state</button>
+        <div id="error-banner" class="error-banner"></div>
+    </div>
+
+    <div class="layout">
+        <div class="board-card">
+            <div class="board-wrap">
+                <div class="eval-bar" aria-label="Evaluation bar">
+                    <div class="eval-bar__white" id="eval-white"></div>
+                    <div class="eval-bar__marker" id="eval-marker"></div>
+                    <div class="eval-label eval-label--top">Black</div>
+                    <div class="eval-label eval-label--bottom">White</div>
+                </div>
+                <div class="board-shell">
+                    <div id="board"></div>
+                    <div id="board-overlay" class="board-overlay">
+                        <div class="thinking-pill">Analyzing…</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="panel">
+                <h2>Position analysis</h2>
+                <div class="metrics-grid">
+                    <div class="metric">
+                        <div class="label">Evaluation</div>
+                        <div class="value" id="eval-text">+0.00</div>
+                    </div>
+                    <div class="metric">
+                        <div class="label">Depth</div>
+                        <div class="value" id="depth-text">0</div>
+                    </div>
+                    <div class="metric">
+                        <div class="label">Nodes</div>
+                        <div class="value" id="nodes-text">0</div>
+                    </div>
+                    <div class="metric">
+                        <div class="label">NPS</div>
+                        <div class="value" id="nps-text">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Last move classification</h3>
+                <div id="classification-wrap">
+                    <span class="classification-pill">Waiting for first move</span>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Top engine lines</h3>
+                <div id="pv-list" class="pv-list"></div>
+            </div>
+
+            <div class="panel">
+                <h3>Move history</h3>
+                <div id="move-list" class="move-list"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<form style="display:none;">{% csrf_token %}</form>
+{{ initial_state|json_script:"initial-state" }}
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chess.js@0.13.4/chess.min.js"></script>
+<script>
+    const INITIAL_STATE = JSON.parse(document.getElementById('initial-state').textContent);
+    const boardElement = document.getElementById('board');
+    const boardOverlay = document.getElementById('board-overlay');
+    const statusText = document.getElementById('status-text');
+    const errorBanner = document.getElementById('error-banner');
+    const simulationsInput = document.getElementById('simulations-input');
+    const evalWhite = document.getElementById('eval-white');
+    const evalMarker = document.getElementById('eval-marker');
+    const evalText = document.getElementById('eval-text');
+    const depthText = document.getElementById('depth-text');
+    const nodesText = document.getElementById('nodes-text');
+    const npsText = document.getElementById('nps-text');
+    const pvList = document.getElementById('pv-list');
+    const moveList = document.getElementById('move-list');
+    const classificationWrap = document.getElementById('classification-wrap');
+
+    let currentState = INITIAL_STATE;
+    let chessGame = new Chess();
+    let board = null;
+    let pendingPoll = null;
+
+    function getCsrfToken() {
+        return document.querySelector('[name=csrfmiddlewaretoken]').value;
+    }
+
+    function showError(message) {
+        errorBanner.textContent = message;
+        errorBanner.classList.add('visible');
+    }
+
+    function clearError() {
+        errorBanner.textContent = '';
+        errorBanner.classList.remove('visible');
+    }
+
+    function setThinking(isThinking) {
+        boardOverlay.classList.toggle('active', Boolean(isThinking));
+    }
+
+    function syncChessFromState(state) {
+        chessGame.reset();
+        (state.moves_uci || []).forEach((move) => chessGame.move({ from: move.slice(0, 2), to: move.slice(2, 4), promotion: move.length > 4 ? move[4] : undefined }));
+    }
+
+    function scoreToPercent(score) {
+        if (!score) {
+            return 50;
+        }
+        if (score.kind === 'mate') {
+            return score.value > 0 ? 100 : 0;
+        }
+        const cp = Number(score.cp_white || 0);
+        return Math.max(0, Math.min(100, 50 + 46 * Math.tanh(cp / 300)));
+    }
+
+    function formatNumber(value) {
+        return new Intl.NumberFormat('en-US').format(Number(value || 0));
+    }
+
+    function renderEvaluation(analysis) {
+        const score = analysis && analysis.score ? analysis.score : { kind: 'cp', cp_white: 0, text: '+0.00' };
+        const percent = scoreToPercent(score);
+        evalWhite.style.height = `${percent}%`;
+        evalMarker.style.bottom = `calc(${percent}% - 1px)`;
+        evalText.textContent = score.text || '+0.00';
+        depthText.textContent = String(analysis && analysis.depth ? analysis.depth : 0);
+        nodesText.textContent = formatNumber(analysis && analysis.nodes ? analysis.nodes : 0);
+        npsText.textContent = formatNumber(analysis && analysis.nps ? analysis.nps : 0);
+    }
+
+    function renderTopLines(analysis) {
+        pvList.innerHTML = '';
+        const lines = analysis && analysis.top_lines ? analysis.top_lines : [];
+        if (!lines.length) {
+            pvList.innerHTML = '<div class="pv-item"><div class="pv-san">No engine line available yet.</div></div>';
+            return;
+        }
+        lines.forEach((line) => {
+            const card = document.createElement('div');
+            card.className = 'pv-item';
+            card.innerHTML = `
+                <div class="pv-meta">
+                    <span>#${line.multipv} • ${line.score_text}</span>
+                    <span>d${line.depth} • ${formatNumber(line.nodes)} nodes</span>
+                </div>
+                <div class="pv-san">${line.san || line.uci}</div>
+            `;
+            pvList.appendChild(card);
+        });
+    }
+
+    function renderMoveHistory(state) {
+        moveList.innerHTML = '';
+        const scratch = new Chess();
+        const rows = [];
+        (state.moves_uci || []).forEach((uci, index) => {
+            const moveObj = { from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.length > 4 ? uci[4] : undefined };
+            const move = scratch.move(moveObj);
+            if (index % 2 === 0) {
+                rows.push({ moveNumber: Math.floor(index / 2) + 1, white: move.san, black: '' });
+            } else {
+                rows[rows.length - 1].black = move.san;
+            }
+        });
+        if (!rows.length) {
+            moveList.innerHTML = '<div class="move-row"><div>1</div><div>Start</div><div>Position</div></div>';
+            return;
+        }
+        rows.forEach((row) => {
+            const item = document.createElement('div');
+            item.className = 'move-row';
+            item.innerHTML = `<div>${row.moveNumber}</div><div>${row.white || ''}</div><div>${row.black || ''}</div>`;
+            moveList.appendChild(item);
+        });
+    }
+
+    function renderClassification(state) {
+        const info = state.player_classification;
+        if (!info) {
+            classificationWrap.innerHTML = '<span class="classification-pill">Waiting for first move</span>';
+            return;
+        }
+        const cssClass = (info.label || '').toLowerCase();
+        classificationWrap.innerHTML = `
+            <div class="classification-pill ${cssClass}">
+                <span>${info.label}</span>
+                <span>•</span>
+                <span>${info.played_move_san || info.played_move_uci}</span>
+                <span>•</span>
+                <span>CP loss ${info.cp_loss}</span>
+            </div>
+        `;
+    }
+
+    function applyState(state) {
+        currentState = state;
+        syncChessFromState(state);
+        if (!board) {
+            board = Chessboard('board', {
+                position: state.fen,
+                draggable: true,
+                pieceTheme: 'https://cdn.jsdelivr.net/npm/@chrisoakman/chessboardjs@1.0.0/www/img/chesspieces/wikipedia/{piece}.png',
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: () => board.position(chessGame.fen()),
+            });
+        } else {
+            board.position(chessGame.fen(), false);
+        }
+        statusText.textContent = state.status_text || 'Ready';
+        renderEvaluation(state.analysis);
+        renderTopLines(state.analysis);
+        renderMoveHistory(state);
+        renderClassification(state);
+        setThinking(Boolean(state.pending));
+    }
+
+    function onDragStart(source, piece) {
+        if (currentState.pending || currentState.is_game_over) {
+            return false;
+        }
+        if (chessGame.turn() === 'b') {
+            return false;
+        }
+        if (piece.startsWith('b')) {
+            return false;
+        }
+        return true;
+    }
+
+    async function onDrop(source, target) {
+        clearError();
+        const move = chessGame.move({ from: source, to: target, promotion: 'q' });
+        if (move === null) {
+            return 'snapback';
+        }
+        board.position(chessGame.fen(), false);
+        setThinking(true);
+        statusText.textContent = 'Submitting move…';
+        try {
+            const formData = new URLSearchParams();
+            formData.set('move', move.from + move.to + (move.promotion || ''));
+            formData.set('simulations', simulationsInput.value || '128');
+            const response = await fetch('{% url "gui:player_move" %}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCsrfToken(),
+                    'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                },
+                body: formData.toString(),
+            });
+            const payload = await response.json();
+            if (!response.ok || !payload.ok) {
+                throw new Error(payload.error || 'Move submission failed.');
+            }
+            applyState(payload.state);
+            pollTask(payload.task_id);
+        } catch (error) {
+            showError(error.message || 'Move submission failed.');
+            await refreshState();
+        }
+    }
+
+    async function refreshState() {
+        const response = await fetch('{% url "gui:game_state" %}');
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+            throw new Error(payload.error || 'Failed to refresh state.');
+        }
+        applyState(payload.state);
+    }
+
+    async function startNewGame() {
+        clearError();
+        if (pendingPoll) {
+            clearTimeout(pendingPoll);
+            pendingPoll = null;
+        }
+        const formData = new URLSearchParams();
+        formData.set('simulations', simulationsInput.value || '128');
+        const response = await fetch('{% url "gui:new_game" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken(),
+                'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            },
+            body: formData.toString(),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+            throw new Error(payload.error || 'Unable to start a new game.');
+        }
+        applyState(payload.state);
+    }
+
+    async function pollTask(taskId) {
+        if (!taskId) {
+            return;
+        }
+        try {
+            const response = await fetch(`{% url "gui:task_status" task_id="TASK_ID" %}`.replace('TASK_ID', taskId));
+            const payload = await response.json();
+            if (!response.ok || !payload.ok) {
+                throw new Error(payload.error || 'Failed to query task status.');
+            }
+            if (payload.status === 'pending') {
+                pendingPoll = setTimeout(() => pollTask(taskId), 350);
+                return;
+            }
+            if (payload.status === 'ready') {
+                applyState(payload.state);
+                return;
+            }
+            pendingPoll = setTimeout(() => pollTask(taskId), 500);
+        } catch (error) {
+            showError(error.message || 'Polling failed.');
+            pendingPoll = setTimeout(() => pollTask(taskId), 800);
+        }
+    }
+
+    document.getElementById('new-game-btn').addEventListener('click', async () => {
+        try {
+            await startNewGame();
+        } catch (error) {
+            showError(error.message || 'Unable to start a new game.');
+        }
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click', async () => {
+        try {
+            await refreshState();
+        } catch (error) {
+            showError(error.message || 'Refresh failed.');
+        }
+    });
+
+    window.addEventListener('resize', () => {
+        if (board) {
+            board.resize();
+        }
+    });
+
+    applyState(INITIAL_STATE);
+</script>
+</body>
+</html>
