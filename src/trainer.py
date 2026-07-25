@@ -141,6 +141,7 @@ class HybridTrainer:
         self._profiled_tflops: Dict[str, bool] = {"phase1": False, "phase2": False}
         self._phase_tflops_estimate: Dict[str, float] = {"phase1": 0.0, "phase2": 0.0}
         self._logged_tflops_mode: Dict[str, bool] = {"phase1": False, "phase2": False}
+        self._active_table_separator = ""
         self._phase1_move_injection_probs = self._normalized_phase1_move_injection_probs()
 
         self._log_run_header()
@@ -510,53 +511,64 @@ class HybridTrainer:
         )
         self.logger.info("=" * 72)
 
-    def _table_separator(self) -> str:
-        columns = (10, 8, 8, 8, 8, 10, 10, 8, 10)
-        return "+" + "+".join("-" * (width + 2) for width in columns) + "+"
+    def _table_separator(self, widths: Sequence[int]) -> str:
+        return "+" + "+".join("-" * (width + 2) for width in widths) + "+"
 
     def _phase_table_header(self, phase: str) -> None:
+        if phase == "I":
+            headers = ("Epoch", "Loss", "Pol", "Val", "Entropy", "Grad", "TFLOPs", "Pos/s", "Nodes/s", "Time", "ETA")
+            widths = (10, 7, 7, 7, 8, 7, 8, 9, 9, 8, 10)
+        else:
+            headers = ("Epoch", "Loss", "Pol", "Val", "Search", "Entropy", "Grad", "Lambda", "TeachRt", "TFLOPs", "Pos/s", "Nodes/s", "Time", "ETA")
+            widths = (10, 7, 7, 7, 7, 8, 7, 7, 7, 8, 9, 9, 8, 10)
+
+        self._active_table_separator = self._table_separator(widths)
         self.logger.info("")
         self.logger.info("Phase %s live epoch table", phase)
-        self.logger.info(self._table_separator())
-        self.logger.info(
-            "| {epoch:^10} | {loss:^8} | {pol:^8} | {val:^8} | {tflops:^8} | {pos:^10} | {nodes:^10} | {time:^8} | {eta:^10} |".format(
-                epoch="Epoch",
-                loss="Loss",
-                pol="PolLoss",
-                val="ValLoss",
-                tflops="TFLOPs",
-                pos="Pos/s",
-                nodes="Nodes/s",
-                time="Time",
-                eta="ETA",
-            )
-        )
-        self.logger.info(self._table_separator())
+        self.logger.info(self._active_table_separator)
+        header_line = "| " + " | ".join(f"{text:^{width}}" for text, width in zip(headers, widths)) + " |"
+        self.logger.info(header_line)
+        self.logger.info(self._active_table_separator)
 
-    def _phase_table_row(
-        self,
-        epoch_display: str,
-        loss_total: float,
-        loss_policy: float,
-        loss_value: float,
-        tflops: float,
-        pos_per_s: float,
-        nodes_per_s: float,
-        epoch_time_s: float,
-        eta_display: str,
-    ) -> None:
+    def _phase1_table_row(self, metrics: Dict[str, float], epoch_display: str, epoch_time_s: float, eta_display: str) -> None:
+        row = (
+            f"{epoch_display:<10}",
+            f"{metrics['loss_total']:>7.4f}",
+            f"{metrics['loss_policy']:>7.4f}",
+            f"{metrics['loss_value']:>7.4f}",
+            f"{metrics['policy_entropy']:>8.4f}",
+            f"{metrics['grad_norm']:>7.3f}",
+            f"{metrics.get('tflops', 0.0):>8.2f}",
+            f"{metrics.get('positions_per_sec', 0.0):>9.1f}",
+            f"{metrics.get('nodes_per_sec', 0.0):>9.1f}",
+            f"{format_seconds(epoch_time_s):>8}",
+            f"{eta_display:>10}",
+        )
+        widths = (10, 7, 7, 7, 8, 7, 8, 9, 9, 8, 10)
         self.logger.info(
-            "| {epoch:<10} | {loss:>8.4f} | {pol:>8.4f} | {val:>8.4f} | {tflops:>8.2f} | {pos:>10.1f} | {nodes:>10.1f} | {etime:>8} | {eta:>10} |".format(
-                epoch=epoch_display,
-                loss=loss_total,
-                pol=loss_policy,
-                val=loss_value,
-                tflops=tflops,
-                pos=pos_per_s,
-                nodes=nodes_per_s,
-                etime=format_seconds(epoch_time_s),
-                eta=eta_display,
-            )
+            "| " + " | ".join(f"{value:>{width}}" for value, width in zip(row, widths)) + " |"
+        )
+
+    def _phase2_table_row(self, metrics: Dict[str, float], epoch_display: str, epoch_time_s: float, eta_display: str) -> None:
+        row = (
+            f"{epoch_display:<10}",
+            f"{metrics['loss_total']:>7.4f}",
+            f"{metrics['loss_policy']:>7.4f}",
+            f"{metrics['loss_value']:>7.4f}",
+            f"{metrics['loss_search']:>7.4f}",
+            f"{metrics['policy_entropy']:>8.4f}",
+            f"{metrics['grad_norm']:>7.3f}",
+            f"{metrics['adaptive_lambda']:>7.4f}",
+            f"{metrics['teacher_ratio']:>7.3f}",
+            f"{metrics.get('tflops', 0.0):>8.2f}",
+            f"{metrics.get('positions_per_sec', 0.0):>9.1f}",
+            f"{metrics.get('nodes_per_sec', 0.0):>9.1f}",
+            f"{format_seconds(epoch_time_s):>8}",
+            f"{eta_display:>10}",
+        )
+        widths = (10, 7, 7, 7, 7, 8, 7, 7, 7, 8, 9, 9, 8, 10)
+        self.logger.info(
+            "| " + " | ".join(f"{value:>{width}}" for value, width in zip(row, widths)) + " |"
         )
 
     def _maybe_profile_tflops(
@@ -655,17 +667,7 @@ class HybridTrainer:
             self.global_step += 1
             self.telemetry.log_metrics(self.global_step, {f"phase1/{k}": v for k, v in metrics.items()})
 
-            self._phase_table_row(
-                epoch_display=f"{epoch + 1}/{target_phase1_epochs}",
-                loss_total=metrics["loss_total"],
-                loss_policy=metrics["loss_policy"],
-                loss_value=metrics["loss_value"],
-                tflops=metrics.get("tflops", 0.0),
-                pos_per_s=metrics.get("positions_per_sec", 0.0),
-                nodes_per_s=metrics.get("nodes_per_sec", 0.0),
-                epoch_time_s=epoch_time_s,
-                eta_display=eta_display,
-            )
+            self._phase1_table_row(metrics, f"{epoch + 1}/{target_phase1_epochs}", epoch_time_s, eta_display)
 
             self.logger.debug(
                 "Phase I epoch %d summary | loss=%.4f | pol=%.4f | val=%.4f | entropy=%.4f | grad=%.4f | tflops=%.2f | pos/s=%.2f | epoch_time=%s | phase_eta=%s",
@@ -686,7 +688,7 @@ class HybridTrainer:
                 self.save_checkpoint(emergency=False)
             self.maybe_periodic_emergency_save()
 
-        self.logger.info(self._table_separator())
+        self.logger.info(self._active_table_separator)
         self.current_stage = "phase2"
         self.epoch_in_stage = 0
 
@@ -733,17 +735,7 @@ class HybridTrainer:
             self.global_step += 1
             self.telemetry.log_metrics(self.global_step, {f"phase2/{k}": v for k, v in metrics.items()})
 
-            self._phase_table_row(
-                epoch_display=f"{epoch + 1}/{self.config.phase2.epochs}",
-                loss_total=metrics["loss_total"],
-                loss_policy=metrics["loss_policy"],
-                loss_value=metrics["loss_value"],
-                tflops=metrics.get("tflops", 0.0),
-                pos_per_s=metrics.get("positions_per_sec", 0.0),
-                nodes_per_s=metrics.get("nodes_per_sec", 0.0),
-                epoch_time_s=epoch_time_s,
-                eta_display=eta_display,
-            )
+            self._phase2_table_row(metrics, f"{epoch + 1}/{self.config.phase2.epochs}", epoch_time_s, eta_display)
 
             self.logger.debug(
                 "Phase II epoch %d summary | loss=%.4f | pol=%.4f | val=%.4f | search=%.4f | entropy=%.4f | grad=%.4f | tflops=%.2f | lambda=%.4f | pos/s=%.2f | nodes/s=%.2f | teacher_ratio=%.3f | epoch_time=%s | phase_eta=%s",
@@ -777,7 +769,7 @@ class HybridTrainer:
                 self.save_checkpoint(emergency=False)
             self.maybe_periodic_emergency_save()
 
-        self.logger.info(self._table_separator())
+        self.logger.info(self._active_table_separator)
 
     # -------------------------------------------------------------------------
     # Data refresh and loaders
